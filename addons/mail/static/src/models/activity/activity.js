@@ -43,7 +43,7 @@ function factory(dependencies) {
             if ('can_write' in data) {
                 data2.canWrite = data.can_write;
             }
-            if ('create_data' in data) {
+            if ('create_date' in data) {
                 data2.dateCreate = data.create_date;
             }
             if ('date_deadline' in data) {
@@ -114,6 +114,18 @@ function factory(dependencies) {
                     ];
                 }
             }
+            if ('request_partner_id' in data) {
+                if (!data.request_partner_id) {
+                    data2.requestingPartner = [['unlink']];
+                } else {
+                    data2.requestingPartner = [
+                        ['insert', {
+                            id: data.request_partner_id[0],
+                            display_name: data.request_partner_id[1],
+                        }],
+                    ];
+                }
+            }
 
             return data2;
         }
@@ -147,9 +159,18 @@ function factory(dependencies) {
                 model: 'mail.activity',
                 method: 'activity_format',
                 args: [this.id],
-            }));
-            this.update(this.constructor.convertData(data));
+            }, { shadow: true }));
+            let shouldDelete = false;
+            if (data) {
+                this.update(this.constructor.convertData(data));
+            } else {
+                shouldDelete = true;
+            }
+            this.thread.refreshActivities();
             this.thread.refresh();
+            if (shouldDelete) {
+                this.delete();
+            }
         }
 
         /**
@@ -187,6 +208,10 @@ function factory(dependencies) {
             this.thread.refresh();
             const thread = this.thread;
             this.delete();
+            if (!action) {
+                thread.refreshActivities();
+                return;
+            }
             this.env.bus.trigger('do-action', {
                 action,
                 options: {
@@ -258,6 +283,12 @@ function factory(dependencies) {
         creator: many2one('mail.user'),
         dateCreate: attr(),
         dateDeadline: attr(),
+        /**
+         * Backup of the feedback content of an activity to be marked as done in the popover.
+         * Feature-specific to restoring the feedback content when component is re-mounted.
+         * In all other cases, this field value should not be trusted.
+         */
+        feedbackBackup: attr(),
         force_next: attr({
             default: false,
         }),
@@ -292,6 +323,14 @@ function factory(dependencies) {
                 'note',
             ],
         }),
+        /**
+         * Determines that an activity is linked to a requesting partner or not.
+         * It will be used notably in website slides to know who triggered the
+         * "request access" activity.
+         * Also, be useful when the assigned user is different from the
+         * "source" or "requesting" partner.
+         */
+        requestingPartner: many2one('mail.partner'),
         state: attr(),
         summary: attr(),
         /**

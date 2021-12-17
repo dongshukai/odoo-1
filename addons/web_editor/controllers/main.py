@@ -17,6 +17,8 @@ from odoo.exceptions import UserError
 from odoo.modules.module import get_module_path, get_resource_path
 from odoo.tools.misc import file_open
 
+from ..models.ir_attachment import SUPPORTED_IMAGE_MIMETYPES
+
 logger = logging.getLogger(__name__)
 DEFAULT_LIBRARY_ENDPOINT = 'https://media-api.odoo.com'
 
@@ -43,7 +45,7 @@ class Web_Editor(http.Controller):
             :returns PNG image converted from given font
         """
         # Make sure we have at least size=1
-        size = max(1, size)
+        size = max(1, min(size, 512))
         # Initialize font
         addons_path = http.addons_manifest['web']['addons_path']
         font_obj = ImageFont.truetype(addons_path + font, size)
@@ -224,7 +226,10 @@ class Web_Editor(http.Controller):
         else:
             # Find attachment by url. There can be multiple matches because of default
             # snippet images referencing the same image in /static/, so we limit to 1
-            attachment = request.env['ir.attachment'].search([('url', '=like', src)], limit=1)
+            attachment = request.env['ir.attachment'].search([
+                ('url', '=like', src),
+                ('mimetype', 'in', SUPPORTED_IMAGE_MIMETYPES),
+            ], limit=1)
         if not attachment:
             return {
                 'attachment': False,
@@ -237,6 +242,10 @@ class Web_Editor(http.Controller):
 
     def _attachment_create(self, name='', data=False, url=False, res_id=False, res_model='ir.ui.view'):
         """Create and return a new attachment."""
+        if name.lower().endswith('.bmp'):
+            # Avoid mismatch between content type and mimetype, see commit msg
+            name = name[:-4]
+
         if not name and url:
             name = url.split("/").pop()
 
@@ -466,10 +475,14 @@ class Web_Editor(http.Controller):
         values = len_args > 1 and args[1] or {}
 
         View = request.env['ir.ui.view']
-        if request.env.user._is_public() \
-                and xmlid in request.env['web_editor.assets']._get_public_asset_xmlids():
-            View = View.sudo()
-        return View._render_template(xmlid, {k: values[k] for k in values if k in trusted_value_keys})
+        if xmlid in request.env['web_editor.assets']._get_public_asset_xmlids():
+            # For white listed assets, bypass access verification
+            # TODO in master this part should be removed and simply use the
+            # public group on the related views instead. And then let the normal
+            # flow handle the rendering.
+            return View.sudo()._render_template(xmlid, {k: values[k] for k in values if k in trusted_value_keys})
+        # Otherwise use normal flow
+        return View.render_public_asset(xmlid, {k: values[k] for k in values if k in trusted_value_keys})
 
     @http.route('/web_editor/modify_image/<model("ir.attachment"):attachment>', type="json", auth="user", website=True)
     def modify_image(self, attachment, res_model=None, res_id=None, name=None, data=None, original_id=None):
@@ -526,13 +539,20 @@ class Web_Editor(http.Controller):
                 svg = file.read()
 
         user_colors = []
-        for key, color in kwargs.items():
-            match = re.match('^c([1-5])$', key)
-            if match:
+        for key, value in kwargs.items():
+            colorMatch = re.match('^c([1-5])$', key)
+            if colorMatch:
                 # Check that color is hex or rgb(a) to prevent arbitrary injection
-                if not re.match(r'(?i)^#[0-9A-F]{6,8}$|^rgba?\(\d{1,3},\d{1,3},\d{1,3}(?:,[0-9.]{1,4})?\)$', color.replace(' ', '')):
+                if not re.match(r'(?i)^#[0-9A-F]{6,8}$|^rgba?\(\d{1,3},\d{1,3},\d{1,3}(?:,[0-9.]{1,4})?\)$', value.replace(' ', '')):
                     raise werkzeug.exceptions.BadRequest()
-                user_colors.append([tools.html_escape(color), match.group(1)])
+                user_colors.append([tools.html_escape(value), colorMatch.group(1)])
+            elif key == 'flip':
+                if value == 'x':
+                    svg = svg.replace('<svg ', '<svg style="transform: scaleX(-1);" ')
+                elif value == 'y':
+                    svg = svg.replace('<svg ', '<svg style="transform: scaleY(-1)" ')
+                elif value == 'xy':
+                    svg = svg.replace('<svg ', '<svg style="transform: scale(-1)" ')
 
         default_palette = {
             '1': '#3AADAA',

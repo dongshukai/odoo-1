@@ -53,6 +53,15 @@ const FormEditor = options.Class.extend({
         return field.records;
     },
     /**
+     * Generates a new ID.
+     *
+     * @private
+     * @returns {string} The new ID
+     */
+    _generateUniqueID() {
+        return Math.random().toString(36).substring(2, 15);
+    },
+    /**
      * Returns a field object
      *
      * @private
@@ -119,10 +128,10 @@ const FormEditor = options.Class.extend({
     /**
      * @private
      * @param {Object} field
-     * @returns {Promise<HTMLElement>}
+     * @returns {HTMLElement}
      */
     _renderField: function (field) {
-        field.id = Math.random().toString(36).substring(2, 15); // Big unique ID
+        field.id = this._generateUniqueID();
         const template = document.createElement('template');
         template.innerHTML = qweb.render("website_form.field_" + field.type, {field: field}).trim();
         return template.content.firstElementChild;
@@ -380,6 +389,14 @@ options.registry.WebsiteFormEditor = FormEditor.extend({
             this.$target.removeClass('d-none');
             this.$message.addClass("d-none");
         }
+
+        // Clear default values coming from data-for/data-values attributes
+        this.$target.find('input[name],textarea[name]').each(function () {
+            var original = $(this).data('website_form_original_default_value');
+            if (original !== undefined && $(this).val() === original) {
+                $(this).val('').removeAttr('value');
+            }
+        });
     },
     /**
      * @override
@@ -418,10 +435,10 @@ options.registry.WebsiteFormEditor = FormEditor.extend({
             field.formatInfo.requiredMark = this._isRequiredMark();
             field.formatInfo.optionalMark = this._isOptionalMark();
             field.formatInfo.mark = this._getMark();
-            const htmlField = this._renderField(field);
-            data.$target.after(htmlField);
+            const fieldEl = this._renderField(field);
+            data.$target.after(fieldEl);
             this.trigger_up('activate_snippet', {
-                $snippet: $(htmlField),
+                $snippet: $(fieldEl),
             });
         }
     },
@@ -557,9 +574,11 @@ options.registry.WebsiteFormEditor = FormEditor.extend({
                         break;
                 }
                 if (field.required) {
-                    // Get default value or for many2one fields the first option.
+                    // Try to retrieve hidden value in form, else,
+                    // get default value or for many2one fields the first option.
+                    const currentValue = this.$target.find(`.s_website_form_dnone input[name="${field.name}"]`).val();
                     const defaultValue = field.defaultValue || field.records[0].id;
-                    this._addHiddenField(defaultValue, field.name);
+                    this._addHiddenField(currentValue || defaultValue, field.name);
                 }
                 uiFragment.insertBefore(option, firstOption);
             });
@@ -712,6 +731,8 @@ options.registry.WebsiteFormEditor = FormEditor.extend({
     },
 });
 
+const authorizedFieldsCache = {};
+
 options.registry.WebsiteFieldEditor = FieldEditor.extend({
     events: _.extend({}, FieldEditor.prototype.events, {
         'click we-button.o_we_select_remove_option': '_onRemoveItemClick',
@@ -734,11 +755,20 @@ options.registry.WebsiteFieldEditor = FieldEditor.extend({
     willStart: async function () {
         const _super = this._super.bind(this);
         // Get the authorized existing fields for the form model
-        this.existingFields = await this._rpc({
-            model: "ir.model",
-            method: "get_authorized_fields",
-            args: [this.formEl.dataset.model_name],
-        }).then(fields => {
+        const model = this.formEl.dataset.model_name;
+        let getFields;
+        if (model in authorizedFieldsCache) {
+            getFields = authorizedFieldsCache[model];
+        } else {
+            getFields = this._rpc({
+                model: "ir.model",
+                method: "get_authorized_fields",
+                args: [model],
+            });
+            authorizedFieldsCache[model] = getFields;
+        }
+
+        this.existingFields = await getFields.then(fields => {
             this.fields = _.each(fields, function (field, fieldName) {
                 field.name = fieldName;
                 field.domain = field.domain || [];
@@ -799,6 +829,19 @@ options.registry.WebsiteFieldEditor = FieldEditor.extend({
         // Other fields type might have change to an existing type.
         // We need to reload the existing type list.
         this.rerender = true;
+    },
+    /**
+     * Rerenders the clone to avoid id duplicates.
+     * Rendering the list before replacing the field is needed
+     * for selects, in order to build this.listTable.
+     *
+     * @override
+     */
+    onClone() {
+        this._renderList();
+        const field = this._getActiveField();
+        const fieldEl = this._renderField(field);
+        this._replaceFieldElement(fieldEl);
     },
 
     //----------------------------------------------------------------------
@@ -957,7 +1000,7 @@ options.registry.WebsiteFieldEditor = FieldEditor.extend({
         }
     },
     /**
-     * Replace the target content with the field provided
+     * Replaces the target content with the field provided.
      *
      * @private
      * @param {Object} field
@@ -965,11 +1008,20 @@ options.registry.WebsiteFieldEditor = FieldEditor.extend({
      */
     _replaceField: async function (field) {
         await this._fetchFieldRecords(field);
-        const htmlField = this._renderField(field);
+        const fieldEl = this._renderField(field);
+        this._replaceFieldElement(fieldEl);
+    },
+    /**
+     * Replaces the target with provided field.
+     *
+     * @private
+     * @param {HTMLElement} fieldEl
+     */
+    _replaceFieldElement(fieldEl) {
         [...this.$target[0].childNodes].forEach(node => node.remove());
-        [...htmlField.childNodes].forEach(node => this.$target[0].appendChild(node));
-        [...htmlField.attributes].forEach(el => this.$target[0].removeAttribute(el.nodeName));
-        [...htmlField.attributes].forEach(el => this.$target[0].setAttribute(el.nodeName, el.nodeValue));
+        [...fieldEl.childNodes].forEach(node => this.$target[0].appendChild(node));
+        [...fieldEl.attributes].forEach(el => this.$target[0].removeAttribute(el.nodeName));
+        [...fieldEl.attributes].forEach(el => this.$target[0].setAttribute(el.nodeName, el.nodeValue));
     },
 
     /**
@@ -1132,7 +1184,7 @@ options.registry.WebsiteFieldEditor = FieldEditor.extend({
             const params = {
                 field: {
                     name: name,
-                    id: Math.random().toString(36).substring(2, 15), // Big unique ID
+                    id: this._generateUniqueID(),
                     required: isRequiredField,
                     formatInfo: {
                         multiPosition: multiInputsWrap.dataset.display,
@@ -1249,10 +1301,10 @@ options.registry.AddFieldForm = FormEditor.extend({
     addField: async function (previewMode, value, params) {
         const field = this._getCustomField('char', 'Custom Text');
         field.formatInfo = this._getDefaultFormat();
-        const htmlField = this._renderField(field);
-        this.$target.find('.s_website_form_submit, .s_website_form_recaptcha').first().before(htmlField);
+        const fieldEl = this._renderField(field);
+        this.$target.find('.s_website_form_submit, .s_website_form_recaptcha').first().before(fieldEl);
         this.trigger_up('activate_snippet', {
-            $snippet: $(htmlField),
+            $snippet: $(fieldEl),
         });
     },
 });

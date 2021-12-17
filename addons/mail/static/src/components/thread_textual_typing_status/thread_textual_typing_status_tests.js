@@ -49,10 +49,10 @@ QUnit.test('receive other member typing status "is typing"', async function (ass
         members: [this.data.currentPartnerId, 17],
     });
     await this.start();
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadTextualTypingStatusComponent(thread);
 
     assert.strictEqual(
@@ -65,8 +65,9 @@ QUnit.test('receive other member typing status "is typing"', async function (ass
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: true,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -87,10 +88,10 @@ QUnit.test('receive other member typing status "is typing" then "no longer is ty
         members: [this.data.currentPartnerId, 17],
     });
     await this.start();
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadTextualTypingStatusComponent(thread);
 
     assert.strictEqual(
@@ -103,8 +104,9 @@ QUnit.test('receive other member typing status "is typing" then "no longer is ty
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: true,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -119,8 +121,9 @@ QUnit.test('receive other member typing status "is typing" then "no longer is ty
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: false,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -143,10 +146,10 @@ QUnit.test('assume other member typing status becomes "no longer is typing" afte
     await this.start({
         hasTimeControl: true,
     });
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadTextualTypingStatusComponent(thread);
 
     assert.strictEqual(
@@ -159,8 +162,9 @@ QUnit.test('assume other member typing status becomes "no longer is typing" afte
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: true,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -190,10 +194,10 @@ QUnit.test ('other member typing status "is typing" refreshes 60 seconds timer o
     await this.start({
         hasTimeControl: true,
     });
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadTextualTypingStatusComponent(thread);
 
     assert.strictEqual(
@@ -206,8 +210,9 @@ QUnit.test ('other member typing status "is typing" refreshes 60 seconds timer o
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: true,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -222,8 +227,9 @@ QUnit.test ('other member typing status "is typing" refreshes 60 seconds timer o
     await this.env.testUtils.advanceTime(50 * 1000);
     const typingData = {
         info: 'typing_status',
-        partner_id: 17,
         is_typing: true,
+        partner_id: 17,
+        partner_name: "Demo",
     };
     const notification = [[false, 'mail.channel', 20], typingData];
     this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -256,10 +262,10 @@ QUnit.test('receive several other members typing status "is typing"', async func
         members: [this.data.currentPartnerId, 10, 11, 12],
     });
     await this.start();
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadTextualTypingStatusComponent(thread);
 
     assert.strictEqual(
@@ -272,8 +278,9 @@ QUnit.test('receive several other members typing status "is typing"', async func
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 10,
             is_typing: true,
+            partner_id: 10,
+            partner_name: "Other10",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -288,8 +295,9 @@ QUnit.test('receive several other members typing status "is typing"', async func
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 11,
             is_typing: true,
+            partner_id: 11,
+            partner_name: "Other11",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -304,8 +312,9 @@ QUnit.test('receive several other members typing status "is typing"', async func
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 12,
             is_typing: true,
+            partner_id: 12,
+            partner_name: "Other12",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -320,8 +329,9 @@ QUnit.test('receive several other members typing status "is typing"', async func
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 10,
             is_typing: false,
+            partner_id: 10,
+            partner_name: "Other10",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -336,8 +346,9 @@ QUnit.test('receive several other members typing status "is typing"', async func
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 10,
             is_typing: true,
+            partner_id: 10,
+            partner_name: "Other10",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);

@@ -380,6 +380,15 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
         // Ribbons may have been edited or deleted in another products' option, need to make sure they're up to date
         this.rerender = true;
     },
+    /**
+     * @override
+     */
+    onBlur: function () {
+        // Since changes will not be saved unless they are validated, reset the
+        // previewed ribbon onBlur to communicate that to the user
+        this._resetRibbonDummy();
+        this._toggleEditingUI(false);
+    },
 
     //--------------------------------------------------------------------------
     // Options
@@ -400,6 +409,11 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
      * @see this.selectClass for params
      */
     async setRibbon(previewMode, widgetValue, params) {
+        if (previewMode === 'reset') {
+            widgetValue = this.prevRibbonId;
+        } else {
+            this.prevRibbonId = this.$target[0].dataset.ribbonId;
+        }
         this.$target[0].dataset.ribbonId = widgetValue;
         this.trigger_up('set_product_ribbon', {
             templateId: this.productTemplateID,
@@ -413,13 +427,14 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
         $ribbons.removeClass(htmlClasses);
 
         $ribbons.addClass(ribbon.html_class || '');
-        $ribbons.css('color', ribbon.text_color);
+        $ribbons.css('color', ribbon.text_color || '');
         $ribbons.css('background-color', ribbon.bg_color || '');
 
         if (!this.ribbons[widgetValue]) {
             $(`[data-ribbon-id="${widgetValue}"]`).each((index, product) => delete product.dataset.ribbonId);
         }
         this._resetRibbonDummy();
+        this._toggleEditingUI(false);
     },
     /**
      * @see this.selectClass for params
@@ -433,6 +448,7 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
      */
     createRibbon(previewMode, widgetValue, params) {
         this.saveMethod = 'create';
+        this.setRibbon(false);
         this.$ribbon.html('Ribbon text');
         this.$ribbon.addClass('bg-primary o_ribbon_left');
         this._toggleEditingUI(true);
@@ -570,7 +586,7 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
                 colorClasses,
                 isTag: /o_tag_(left|right)/.test(ribbon.html_class),
                 isLeft: /o_(tag|ribbon)_left/.test(ribbon.html_class),
-                textColor: ribbon.text_color || colorClasses ? 'currentColor' : defaultTextColor,
+                textColor: ribbon.text_color || (colorClasses ? 'currentColor' : defaultTextColor),
             }));
         });
     },
@@ -608,6 +624,8 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
     _toggleEditingUI(state) {
         this.$el.find('[data-name="ribbon_options"]').toggleClass('d-none', state);
         this.$el.find('[data-name="ribbon_customize_opt"]').toggleClass('d-none', !state);
+        this.$('.o_ribbon:not(.o_wsale_ribbon_dummy)').toggleClass('d-none', state);
+        this.$ribbon.toggleClass('d-none', !state);
     },
     /**
      * Creates a copy of current ribbon to manipulate for edition/creation.
@@ -618,7 +636,8 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
         if (this.$ribbon) {
             this.$ribbon.remove();
         }
-        this.$ribbon = this.$('.o_ribbon').clone().addClass('d-none o_wsale_ribbon_dummy').appendTo(this.$target);
+        const $original = this.$('.o_ribbon');
+        this.$ribbon = $original.clone().addClass('d-none o_wsale_ribbon_dummy').appendTo($original.parent());
     },
 
     //--------------------------------------------------------------------------

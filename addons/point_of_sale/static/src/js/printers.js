@@ -3,6 +3,7 @@ odoo.define('point_of_sale.Printer', function (require) {
 
 var Session = require('web.Session');
 var core = require('web.core');
+const { Gui } = require('point_of_sale.Gui');
 var _t = core._t;
 
 // IMPROVEMENT: This is too much. We can get away from this class.
@@ -43,6 +44,7 @@ var PrinterMixin = {
     init: function() {
         this.receipt_queue = [];
         this.printResultGenerator = new PrintResultGenerator();
+        this.htmlToImgLetterRendering = false; // Whether to render each letter seperately. Necessary if letter-spacing is used.
     },
 
     /**
@@ -68,7 +70,7 @@ var PrinterMixin = {
             }
             // rpc call is okay but printing failed because
             // IoT box can't find a printer.
-            if (!sendPrintResult || (sendPrintResult && !sendPrintResult.result)) {
+            if (!sendPrintResult || sendPrintResult.result === false) {
                 this.receipt_queue.length = 0;
                 return this.printResultGenerator.IoTResultError();
             }
@@ -100,7 +102,8 @@ var PrinterMixin = {
                 onrendered: function (canvas) {
                     $('.pos-receipt-print').empty();
                     resolve(self.process_canvas(canvas));
-                }
+                },
+                letterRendering: self.htmlToImgLetterRendering,
             })
         });
         return promise;
@@ -129,6 +132,7 @@ var Printer = core.Class.extend(PrinterMixin, {
     init: function (url, pos) {
         PrinterMixin.init.call(this, arguments);
         this.pos = pos;
+        this.htmlToImgLetterRendering = pos.htmlToImgLetterRendering();
         this.connection = new Session(undefined, url || 'http://localhost:8069', { use_cors: true});
     },
 

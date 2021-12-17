@@ -116,7 +116,7 @@
                 <div class="modal-content">
                     <header class="modal-header">
                         <h4 class="modal-title">A problem has occured</h4>
-                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">&amp;times;</button>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">×</button>
                     </header>
                     <main class="modal-body"><p>To take this survey, please close all other tabs on <strong class="text-danger"></strong>.</p></main>
                     <footer class="modal-footer"><button type="button" class="btn btn-primary" data-dismiss="modal">Continue here</button></footer>
@@ -160,6 +160,7 @@
             t-att-data-question-time-limit-reached="answer.question_time_limit_reached"
             t-att-data-has-answered="bool(has_answered)"
             t-att-data-is-page-description="bool(question and question.is_page and not is_html_empty(question.description))"
+            t-att-data-server-time="server_time"
             t-att-data-timer="timer_start"
             t-att-data-time-limit-minutes="time_limit_minutes"/>
         <t t-if="survey.questions_layout == 'one_page'">

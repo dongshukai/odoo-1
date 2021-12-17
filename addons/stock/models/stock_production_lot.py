@@ -77,7 +77,7 @@ class ProductionLot(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         self._check_create()
-        return super(ProductionLot, self).create(vals_list)
+        return super(ProductionLot, self.with_context(mail_create_nosubscribe=True)).create(vals_list)
 
     def write(self, vals):
         if 'company_id' in vals:
@@ -94,6 +94,7 @@ class ProductionLot(models.Model):
                 ))
         return super(ProductionLot, self).write(vals)
 
+    @api.depends('quant_ids', 'quant_ids.quantity')
     def _product_qty(self):
         for lot in self:
             # We only care for the quants in internal or transit locations.

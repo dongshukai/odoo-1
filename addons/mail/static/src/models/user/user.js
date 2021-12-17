@@ -67,7 +67,7 @@ function factory(dependencies) {
                     context,
                     fields,
                 },
-            });
+            }, { shadow: true });
             return this.env.models['mail.user'].insert(usersData.map(userData =>
                 this.env.models['mail.user'].convertData(userData)
             ));
@@ -113,7 +113,9 @@ function factory(dependencies) {
                 thread.model === 'mail.channel' &&
                 thread.public === 'private'
             );
-            if (!chat) {
+            if (!chat ||!chat.isPinned) {
+                // if chat is not pinned then it has to be pinned client-side
+                // and server-side, which is a side effect of following rpc
                 chat = await this.async(() =>
                     this.env.models['mail.thread'].performRpcCreateChat({
                         partnerIds: [this.partner.id],
@@ -202,6 +204,12 @@ function factory(dependencies) {
 
     User.fields = {
         id: attr(),
+        /**
+         * Determines whether this user is an internal user. An internal user is
+         * a member of the group `base.group_user`. This is the inverse of the
+         * `share` field in python.
+         */
+        isInternalUser: attr(),
         display_name: attr({
             compute: '_computeDisplayName',
             dependencies: [

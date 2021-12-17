@@ -296,6 +296,7 @@ class FSWatcherInotify(FSWatcherBase):
     def stop(self):
         self.started = False
         self.thread.join()
+        del self.watcher  # ensures inotify watches are freed up before reexec
 
 
 #----------------------------------------------------------
@@ -391,7 +392,7 @@ class ThreadedServer(CommonServer):
         # e.g. threads that exceeded their real time,
         # but which finished before the server could restart.
         for thread in list(self.limits_reached_threads):
-            if not thread.isAlive():
+            if not thread.is_alive():
                 self.limits_reached_threads.remove(thread)
         if self.limits_reached_threads:
             self.limit_reached_time = self.limit_reached_time or time.time()
@@ -489,7 +490,7 @@ class ThreadedServer(CommonServer):
             _logger.debug('process %r (%r)', thread, thread.isDaemon())
             if (thread != me and not thread.isDaemon() and thread.ident != self.main_thread_id and
                     thread not in self.limits_reached_threads):
-                while thread.isAlive() and (time.time() - stop_time) < 1:
+                while thread.is_alive() and (time.time() - stop_time) < 1:
                     # We wait for requests to finish, up to 1 second.
                     _logger.debug('join and sleep')
                     # Need a busyloop here as thread.join() masks signals
@@ -1175,7 +1176,7 @@ def load_test_file_py(registry, test_file):
         for mod in [m for m in get_modules() if '/%s/' % m in test_file]:
             for mod_mod in loader.get_test_modules(mod):
                 mod_path, _ = os.path.splitext(getattr(mod_mod, '__file__', ''))
-                if test_path == mod_path:
+                if test_path == config._normalize(mod_path):
                     tests = loader.unwrap_suite(
                         unittest.TestLoader().loadTestsFromModule(mod_mod))
                     suite = OdooSuite(tests)
@@ -1214,7 +1215,7 @@ def preload_registries(dbnames):
                 t0 = time.time()
                 t0_sql = odoo.sql_db.sql_counter
                 module_names = (registry.updated_modules if update_module else
-                                registry._init_modules)
+                                sorted(registry._init_modules))
                 _logger.info("Starting post tests")
                 tests_before = registry._assertion_report.testsRun
                 with odoo.api.Environment.manage():
@@ -1239,7 +1240,6 @@ def start(preload=None, stop=False):
     global server
 
     load_server_wide_modules()
-    odoo.service.wsgi_server._patch_xmlrpc_marshaller()
 
     if odoo.evented:
         server = GeventServer(odoo.service.wsgi_server.application)

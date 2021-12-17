@@ -44,6 +44,7 @@
                 <script type="text/javascript" src="/website_slides/static/src/tests/tours/slides_course_member.js"/>
                 <script type="text/javascript" src="/website_slides/static/src/tests/tours/slides_course_member_yt.js"/>
                 <script type="text/javascript" src="/website_slides/static/src/tests/tours/slides_course_publisher.js"/>
+                <script type="text/javascript" src="/website_slides/static/src/tests/tours/slides_full_screen_web_editor.js"/>
             </xpath>
         </template>
 
@@ -64,6 +65,11 @@
             <script type="text/javascript" src="/website_slides/static/src/js/slides_embed.js"></script>
         </template>
 
+        <template id="website_slides_tests" name="eLearning tests" inherit_id="web.qunit_suite_tests">
+            <xpath expr="//script[last()]" position="after">
+                <script type="text/javascript" src="/website_slides/static/src/components/activity/activity_tests.js"/>
+            </xpath>
+        </template>
 
     </data>
 </odoo>

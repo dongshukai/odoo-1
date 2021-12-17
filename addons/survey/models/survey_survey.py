@@ -7,7 +7,7 @@ import uuid
 import werkzeug
 
 from odoo import api, exceptions, fields, models, _
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, UserError
 from odoo.osv import expression
 from odoo.tools import is_html_empty
 
@@ -812,9 +812,16 @@ class Survey(models.Model):
 
     def action_send_survey(self):
         """ Open a window to compose an email, pre-filled with the survey message """
-        # Ensure that this survey has at least one page with at least one question.
-        if (not self.page_ids and self.questions_layout == 'page_per_section') or not self.question_ids:
-            raise exceptions.UserError(_('You cannot send an invitation for a survey that has no questions.'))
+        # Ensure that this survey has at least one question.
+        if not self.question_ids:
+            raise UserError(_('You cannot send an invitation for a survey that has no questions.'))
+
+        # Ensure that this survey has at least one section with question(s), if question layout is 'One page per section'.
+        if self.questions_layout == 'page_per_section':
+            if not self.page_ids:
+                raise UserError(_('You cannot send an invitation for a "One page per section" survey if the survey has no sections.'))
+            if not self.page_ids.mapped('question_ids'):
+                raise UserError(_('You cannot send an invitation for a "One page per section" survey if the survey only contains empty sections.'))
 
         if self.state == 'closed':
             raise exceptions.UserError(_("You cannot send invitations for closed surveys."))
@@ -879,8 +886,7 @@ class Survey(models.Model):
         }
 
     def action_survey_user_input_completed(self):
-        action_rec = self.env.ref('survey.action_survey_user_input')
-        action = action_rec.read()[0]
+        action = self.env['ir.actions.act_window']._for_xml_id('survey.action_survey_user_input')
         ctx = dict(self.env.context)
         ctx.update({'search_default_survey_id': self.ids[0],
                     'search_default_completed': 1,
@@ -889,8 +895,7 @@ class Survey(models.Model):
         return action
 
     def action_survey_user_input_certified(self):
-        action_rec = self.env.ref('survey.action_survey_user_input')
-        action = action_rec.read()[0]
+        action = self.env['ir.actions.act_window']._for_xml_id('survey.action_survey_user_input')
         ctx = dict(self.env.context)
         ctx.update({'search_default_survey_id': self.ids[0],
                     'search_default_scoring_success': 1,
@@ -899,8 +904,7 @@ class Survey(models.Model):
         return action
 
     def action_survey_user_input(self):
-        action_rec = self.env.ref('survey.action_survey_user_input')
-        action = action_rec.read()[0]
+        action = self.env['ir.actions.act_window']._for_xml_id('survey.action_survey_user_input')
         ctx = dict(self.env.context)
         ctx.update({'search_default_survey_id': self.ids[0],
                     'search_default_not_test': 1})

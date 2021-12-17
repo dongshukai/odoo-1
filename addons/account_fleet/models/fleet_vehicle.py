@@ -17,7 +17,7 @@ class FleetVehicle(models.Model):
             return
 
         for vehicle in self:
-            vehicle.account_move_ids = self.env['account.move.line'].search([('vehicle_id', '=', self.id), ('move_id.state', '!=', 'cancel')]).move_id
+            vehicle.account_move_ids = self.env['account.move.line'].search([('vehicle_id', '=', vehicle.id), ('move_id.state', '!=', 'cancel')]).move_id
             vehicle.bill_count = len(vehicle.account_move_ids)
 
     def action_view_bills(self):
@@ -26,8 +26,7 @@ class FleetVehicle(models.Model):
         form_view_ref = self.env.ref('account.view_move_form', False)
         tree_view_ref = self.env.ref('account.view_move_tree', False)
 
-        action = self.env.ref('account.action_move_in_invoice_type')
-        result = action.read()[0]
+        result = self.env['ir.actions.act_window']._for_xml_id('account.action_move_in_invoice_type')
         result.update({
             'domain': [('id', 'in', self.account_move_ids.ids)],
             'views': [(tree_view_ref.id, 'tree'), (form_view_ref.id, 'form')],

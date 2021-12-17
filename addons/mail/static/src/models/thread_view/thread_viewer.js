@@ -13,10 +13,34 @@ function factory(dependencies) {
         //----------------------------------------------------------------------
 
         /**
-         * @param {string} scrollTop
+         * @param {integer} scrollHeight
+         * @param {mail.thread_cache} threadCache
          */
-        saveThreadCacheScrollPositionsAsInitial(scrollTop) {
-            if (!this.threadCache) {
+        saveThreadCacheScrollHeightAsInitial(scrollHeight, threadCache) {
+            threadCache = threadCache || this.threadCache;
+            if (!threadCache) {
+                return;
+            }
+            if (this.chatter) {
+                // Initial scroll height is disabled for chatter because it is
+                // too complex to handle correctly and less important
+                // functionally.
+                return;
+            }
+            this.update({
+                threadCacheInitialScrollHeights: Object.assign({}, this.threadCacheInitialScrollHeights, {
+                    [threadCache.localId]: scrollHeight,
+                }),
+            });
+        }
+
+        /**
+         * @param {integer} scrollTop
+         * @param {mail.thread_cache} threadCache
+         */
+        saveThreadCacheScrollPositionsAsInitial(scrollTop, threadCache) {
+            threadCache = threadCache || this.threadCache;
+            if (!threadCache) {
                 return;
             }
             if (this.chatter) {
@@ -27,7 +51,7 @@ function factory(dependencies) {
             }
             this.update({
                 threadCacheInitialScrollPositions: Object.assign({}, this.threadCacheInitialScrollPositions, {
-                    [this.threadCache.localId]: scrollTop,
+                    [threadCache.localId]: scrollTop,
                 }),
             });
         }
@@ -229,6 +253,15 @@ function factory(dependencies) {
                 'stringifiedDomain',
                 'thread',
             ],
+        }),
+        /**
+         * Determines the initial scroll height of thread caches, which is the
+         * scroll height at the time the last scroll position was saved.
+         * Useful to only restore scroll position when the corresponding height
+         * is available, otherwise the restore makes no sense.
+         */
+        threadCacheInitialScrollHeights: attr({
+            default: {},
         }),
         /**
          * Determines the initial scroll positions of thread caches.

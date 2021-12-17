@@ -39,26 +39,44 @@ class AccountAnalyticLine(models.Model):
         return []
 
     task_id = fields.Many2one(
-        'project.task', 'Task', compute='_compute_project_task_id', store=True, readonly=False, index=True,
+        'project.task', 'Task', compute='_compute_task_id', store=True, readonly=False, index=True,
         domain="[('company_id', '=', company_id), ('project_id.allow_timesheets', '=', True), ('project_id', '=?', project_id)]")
     project_id = fields.Many2one(
-        'project.project', 'Project', compute='_compute_project_task_id', store=True, readonly=False,
+        'project.project', 'Project', compute='_compute_project_id', store=True, readonly=False,
         domain=_domain_project_id)
     user_id = fields.Many2one(compute='_compute_user_id', store=True, readonly=False)
     employee_id = fields.Many2one('hr.employee', "Employee", domain=_domain_employee_id)
     department_id = fields.Many2one('hr.department', "Department", compute='_compute_department_id', store=True, compute_sudo=True)
     encoding_uom_id = fields.Many2one('uom.uom', compute='_compute_encoding_uom_id')
+    partner_id = fields.Many2one(compute='_compute_partner_id', store=True, readonly=False)
 
     def _compute_encoding_uom_id(self):
         for analytic_line in self:
             analytic_line.encoding_uom_id = analytic_line.company_id.timesheet_encode_uom_id
 
-    @api.depends('task_id', 'task_id.project_id', 'project_id')
-    def _compute_project_task_id(self):
+    @api.depends('task_id.partner_id', 'project_id.partner_id')
+    def _compute_partner_id(self):
+        for timesheet in self:
+            if timesheet.project_id:
+                timesheet.partner_id = timesheet.task_id.partner_id or timesheet.project_id.partner_id
+
+    @api.depends('task_id', 'task_id.project_id')
+    def _compute_project_id(self):
         for line in self.filtered(lambda line: not line.project_id):
             line.project_id = line.task_id.project_id
-        for line in self.filtered(lambda line: not line.project_id and line.project_id != line.task_id.project_id):
+
+    @api.depends('project_id')
+    def _compute_task_id(self):
+        for line in self.filtered(lambda line: not line.project_id):
             line.task_id = False
+
+    @api.onchange('project_id')
+    def _onchange_project_id(self):
+        # TODO KBA in master - check to do it "properly", currently:
+        # This onchange is used to reset the task_id when the project changes.
+        # Doing it in the compute will remove the task_id when the project of a task changes.
+        if self.project_id != self.task_id.project_id:
+            self.task_id = False
 
     @api.depends('employee_id')
     def _compute_user_id(self):
@@ -124,6 +142,9 @@ class AccountAnalyticLine(models.Model):
         return etree.tostring(doc, encoding='unicode')
 
     def _timesheet_get_portal_domain(self):
+        if self.env.user.has_group('hr_timesheet.group_hr_timesheet_user'):
+            # Then, he is internal user, and we take the domain for this current user
+            return self.env['ir.rule']._compute_domain(self._name)
         return ['&',
                     '|', '|', '|',
                     ('task_id.project_id.message_partner_ids', 'child_of', [self.env.user.partner_id.commercial_partner_id.id]),
@@ -141,7 +162,7 @@ class AccountAnalyticLine(models.Model):
         if vals.get('project_id') and not vals.get('account_id'):
             project = self.env['project.project'].browse(vals.get('project_id'))
             vals['account_id'] = project.analytic_account_id.id
-            vals['company_id'] = project.analytic_account_id.company_id.id
+            vals['company_id'] = project.analytic_account_id.company_id.id or project.company_id.id
             if not project.analytic_account_id.active:
                 raise UserError(_('The project you are timesheeting on is not linked to an active analytic account. Set one on the project configuration.'))
         # employee implies user

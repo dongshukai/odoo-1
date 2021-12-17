@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
-from odoo.tools import float_is_zero
+from odoo.tools import float_is_zero, OrderedSet
 
 import logging
 _logger = logging.getLogger(__name__)
@@ -19,23 +19,28 @@ class StockMove(models.Model):
     account_move_ids = fields.One2many('account.move', 'stock_move_id')
     stock_valuation_layer_ids = fields.One2many('stock.valuation.layer', 'stock_move_id')
 
+    def _filter_anglo_saxon_moves(self, product):
+        return self.filtered(lambda m: m.product_id.id == product.id)
+
     def action_get_account_moves(self):
         self.ensure_one()
-        action_ref = self.env.ref('account.action_move_journal_line')
-        if not action_ref:
-            return False
-        action_data = action_ref.read()[0]
+        action_data = self.env['ir.actions.act_window']._for_xml_id('account.action_move_journal_line')
         action_data['domain'] = [('id', 'in', self.account_move_ids.ids)]
         return action_data
+
+    def _should_force_price_unit(self):
+        self.ensure_one()
+        return False
 
     def _get_price_unit(self):
         """ Returns the unit price to value this stock move """
         self.ensure_one()
         price_unit = self.price_unit
+        precision = self.env['decimal.precision'].precision_get('Product Price')
         # If the move is a return, use the original move's price unit.
         if self.origin_returned_move_id and self.origin_returned_move_id.sudo().stock_valuation_layer_ids:
-            price_unit = self.origin_returned_move_id.stock_valuation_layer_ids[-1].unit_cost
-        return not self.company_id.currency_id.is_zero(price_unit) and price_unit or self.product_id.standard_price
+            price_unit = self.origin_returned_move_id.sudo().stock_valuation_layer_ids[-1].unit_cost
+        return price_unit if not float_is_zero(price_unit, precision) or self._should_force_price_unit() else self.product_id.standard_price
 
     @api.model
     def _get_valued_types(self):
@@ -57,13 +62,13 @@ class StockMove(models.Model):
         :rtype: recordset
         """
         self.ensure_one()
-        res = self.env['stock.move.line']
+        res = OrderedSet()
         for move_line in self.move_line_ids:
             if move_line.owner_id and move_line.owner_id != move_line.company_id.partner_id:
                 continue
             if not move_line.location_id._should_be_valued() and move_line.location_dest_id._should_be_valued():
-                res |= move_line
-        return res
+                res.add(move_line.id)
+        return self.env['stock.move.line'].browse(res)
 
     def _is_in(self):
         """Check if the move should be considered as entering the company so that the cost method
@@ -182,6 +187,7 @@ class StockMove(models.Model):
             svl_vals.update(move._prepare_common_svl_vals())
             if forced_quantity:
                 svl_vals['description'] = 'Correction of %s (modification of past move)' % move.picking_id.name or move.name
+            svl_vals['description'] += svl_vals.pop('rounding_adjustment', '')
             svl_vals_list.append(svl_vals)
         return self.env['stock.valuation.layer'].sudo().create(svl_vals_list)
 
@@ -340,15 +346,8 @@ class StockMove(models.Model):
         self = self.with_company(self.company_id)
         accounts_data = self.product_id.product_tmpl_id.get_product_accounts()
 
-        if self.location_id.valuation_out_account_id:
-            acc_src = self.location_id.valuation_out_account_id.id
-        else:
-            acc_src = accounts_data['stock_input'].id
-
-        if self.location_dest_id.valuation_in_account_id:
-            acc_dest = self.location_dest_id.valuation_in_account_id.id
-        else:
-            acc_dest = accounts_data['stock_output'].id
+        acc_src = self._get_src_account(accounts_data)
+        acc_dest = self._get_dest_account(accounts_data)
 
         acc_valuation = accounts_data.get('stock_valuation', False)
         if acc_valuation:
@@ -363,6 +362,12 @@ class StockMove(models.Model):
             raise UserError(_('You don\'t have any stock valuation account defined on your product category. You must define one before processing this operation.'))
         journal_id = accounts_data['stock_journal'].id
         return journal_id, acc_src, acc_dest, acc_valuation
+
+    def _get_src_account(self, accounts_data):
+        return self.location_id.valuation_out_account_id.id or accounts_data['stock_input'].id
+
+    def _get_dest_account(self, accounts_data):
+        return self.location_dest_id.valuation_in_account_id.id or accounts_data['stock_output'].id
 
     def _prepare_account_move_line(self, qty, cost, credit_account_id, debit_account_id, description):
         """
@@ -468,16 +473,14 @@ class StockMove(models.Model):
             # if the move isn't owned by the company, we don't make any valuation
             return False
 
-        location_from = self.location_id
-        location_to = self.location_dest_id
         company_from = self._is_out() and self.mapped('move_line_ids.location_id.company_id') or False
         company_to = self._is_in() and self.mapped('move_line_ids.location_dest_id.company_id') or False
 
+        journal_id, acc_src, acc_dest, acc_valuation = self._get_accounting_data_for_valuation()
         # Create Journal Entry for products arriving in the company; in case of routes making the link between several
         # warehouse of the same company, the transit location belongs to this company, so we don't need to create accounting entries
         if self._is_in():
-            journal_id, acc_src, acc_dest, acc_valuation = self._get_accounting_data_for_valuation()
-            if location_from and location_from.usage == 'customer':  # goods returned from customer
+            if self._is_returned(valued_type='in'):
                 self.with_company(company_to)._create_account_move_line(acc_dest, acc_valuation, journal_id, qty, description, svl_id, cost)
             else:
                 self.with_company(company_to)._create_account_move_line(acc_src, acc_valuation, journal_id, qty, description, svl_id, cost)
@@ -485,15 +488,13 @@ class StockMove(models.Model):
         # Create Journal Entry for products leaving the company
         if self._is_out():
             cost = -1 * cost
-            journal_id, acc_src, acc_dest, acc_valuation = self._get_accounting_data_for_valuation()
-            if location_to and location_to.usage == 'supplier':  # goods returned to supplier
+            if self._is_returned(valued_type='out'):
                 self.with_company(company_from)._create_account_move_line(acc_valuation, acc_src, journal_id, qty, description, svl_id, cost)
             else:
                 self.with_company(company_from)._create_account_move_line(acc_valuation, acc_dest, journal_id, qty, description, svl_id, cost)
 
         if self.company_id.anglo_saxon_accounting:
             # Creates an account entry from stock_input to stock_output on a dropship move. https://github.com/odoo/odoo/issues/12687
-            journal_id, acc_src, acc_dest, acc_valuation = self._get_accounting_data_for_valuation()
             if self._is_dropshipped():
                 if cost > 0:
                     self.with_company(self.company_id)._create_account_move_line(acc_src, acc_valuation, journal_id, qty, description, svl_id, cost)
@@ -516,3 +517,10 @@ class StockMove(models.Model):
         to the way they mix stock moves with invoices.
         """
         return self.env['account.move']
+
+    def _is_returned(self, valued_type):
+        self.ensure_one()
+        if valued_type == 'in':
+            return self.location_id and self.location_id.usage == 'customer'   # goods returned from customer
+        if valued_type == 'out':
+            return self.location_dest_id and self.location_dest_id.usage == 'supplier'   # goods returned to supplier

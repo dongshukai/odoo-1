@@ -34,15 +34,11 @@ tour.register('slides_tour', {
     content: _t("Click on the <b>Create</b> button to create your first course."),
 }, {
     trigger: '.o_wslides_js_slide_section_add',
-    content: _t("Congratulation, your course is created, but there isn't any content yet. First, let's add a <b>Section</b> to give your course a structure."),
-    position: 'bottom',
-}, {
-    trigger: 'input[name="name"]',
-    content: _t("A good course has structure and a table of content. Your first section will be the <b>Introduction</b>."),
+    content: _t("Congratulations, your course has been created, but there isn't any content yet. First, let's add a <b>Section</b> to give your course a structure."),
     position: 'bottom',
 }, {
     trigger: 'button.btn-primary',
-    content: _t("Click on <b>Save</b> to apply changes."),
+    content: _t("A good course has a structure. Pick a name for your first section and click <b>Save</b> to create it."),
     position: 'bottom',
     width: 260,
 }, {
@@ -69,7 +65,7 @@ tour.register('slides_tour', {
     width: 285,
 }, {
     trigger: 'span.badge-info:contains("New")',
-    content: _t("Congratulation! Your first lesson is available. Let's see the options available here. The tag \"<b>New</b>\" indicate that this lesson has less than 7 days."),
+    content: _t("Congratulations! Your first lesson is available. Let's see the options available here. The tag \"<b>New</b>\" indicates that this lesson was created less than 7 days ago."),
     position: 'bottom',
 }, {
     trigger: 'a[name="o_wslides_list_slide_add_quizz"]',
@@ -110,7 +106,7 @@ tour.register('slides_tour', {
     position: 'bottom',
 }, {
     trigger: 'a.o_wslides_js_slides_list_slide_link',
-    content: _t("Congratulation you've created your first course.<br/>Click on the title of this content to see it in fullscreen mode."),
+    content: _t("Congratulations, you've created your first course.<br/>Click on the title of this content to see it in fullscreen mode."),
     position: 'bottom',
 }]);
 

@@ -92,15 +92,15 @@ $.fn.extend({
     },
     /**
      * Makes DOM elements bounce the way Odoo decided it.
+     *
+     * @param {string} [extraClass]
      */
-    odooBounce: function () {
-        return this.each(function () {
-            var $el = $(this);
-            $el.addClass('o_catch_attention');
-            setTimeout(function () {
-                $el.removeClass('o_catch_attention');
-            }, 400);
-        });
+    odooBounce: function (extraClass) {
+        for (const el of this) {
+            el.classList.add('o_catch_attention', extraClass);
+            setTimeout(() => el.classList.remove('o_catch_attention', extraClass), 400);
+        }
+        return this;
     },
     /**
      * Allows to bind events to a handler just as the standard `$.on` function
@@ -153,7 +153,10 @@ $.fn.extend({
             }
             const scrollableEl = isScrollElement ? el : $(el).parent().closestScrollable()[0];
             const style = window.getComputedStyle(el);
-            const newValue = parseInt(style[cssProperty]) + scrollableEl.offsetWidth - scrollableEl.clientWidth;
+            const borderLeftWidth = parseInt(style.borderLeftWidth.replace('px', ''));
+            const borderRightWidth = parseInt(style.borderRightWidth.replace('px', ''));
+            const bordersWidth = borderLeftWidth + borderRightWidth;
+            const newValue = parseInt(style[cssProperty]) + scrollableEl.offsetWidth - scrollableEl.clientWidth - bordersWidth;
             el.style.setProperty(cssProperty, `${newValue}px`, 'important');
         }
     },
@@ -171,7 +174,7 @@ $.fn.extend({
             // Search for a body child which is at least as tall as the body
             // and which has the ability to scroll if enough content in it. If
             // found, suppose this is the top scrolling element.
-            if (el.scrollHeight < bodyHeight) {
+            if (bodyHeight - el.scrollHeight > 1.5) {
                 continue;
             }
             const $el = $(el);

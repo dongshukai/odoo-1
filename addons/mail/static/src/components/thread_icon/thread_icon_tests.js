@@ -54,10 +54,10 @@ QUnit.test('chat: correspondent is typing', async function (assert) {
         members: [this.data.currentPartnerId, 17],
     });
     await this.start();
-    const thread = this.env.models['mail.thread'].find(thread =>
-        thread.id === 20 &&
-        thread.model === 'mail.channel'
-    );
+    const thread = this.env.models['mail.thread'].findFromIdentifyingData({
+        id: 20,
+        model: 'mail.channel',
+    });
     await this.createThreadIcon(thread);
 
     assert.containsOnce(
@@ -75,8 +75,9 @@ QUnit.test('chat: correspondent is typing', async function (assert) {
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: true,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);
@@ -96,8 +97,9 @@ QUnit.test('chat: correspondent is typing', async function (assert) {
     await afterNextRender(() => {
         const typingData = {
             info: 'typing_status',
-            partner_id: 17,
             is_typing: false,
+            partner_id: 17,
+            partner_name: "Demo",
         };
         const notification = [[false, 'mail.channel', 20], typingData];
         this.widget.call('bus_service', 'trigger', 'notification', [notification]);

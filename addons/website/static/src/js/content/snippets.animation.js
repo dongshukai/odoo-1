@@ -124,10 +124,12 @@ var AnimationEffect = Class.extend(mixins.ParentedMixin, {
         // Initialize the animation startEvents, startTarget, endEvents, endTarget and callbacks
         this._updateCallback = updateCallback;
         this.startEvents = startEvents || 'scroll';
-        this.$startTarget = $($startTarget ? $startTarget : this.startEvents === 'scroll' ? $().getScrollingElement()[0] : window);
+        const mainScrollingElement = $().getScrollingElement()[0];
+        const mainScrollingTarget = mainScrollingElement === document.documentElement ? window : mainScrollingElement;
+        this.$startTarget = $($startTarget ? $startTarget : this.startEvents === 'scroll' ? mainScrollingTarget : window);
         if (options.getStateCallback) {
             this._getStateCallback = options.getStateCallback;
-        } else if (this.startEvents === 'scroll' && this.$startTarget[0] === $().getScrollingElement()[0]) {
+        } else if (this.startEvents === 'scroll' && this.$startTarget[0] === mainScrollingTarget) {
             const $scrollable = this.$startTarget;
             this._getStateCallback = function () {
                 return $scrollable.scrollTop();
@@ -680,6 +682,18 @@ registry.backgroundVideo = publicWidget.Widget.extend({
 
         $(window).on('resize.' + this.iframeID, throttledUpdate);
 
+        const $modal = this.$target.closest('.modal');
+        if ($modal.length) {
+            $modal.on('show.bs.modal', () => {
+                const videoContainerEl = this.$target[0].querySelector('.o_bg_video_container');
+                videoContainerEl.classList.add('d-none');
+            });
+            $modal.on('shown.bs.modal', () => {
+                this._adjustIframe();
+                const videoContainerEl = this.$target[0].querySelector('.o_bg_video_container');
+                videoContainerEl.classList.remove('d-none');
+            });
+        }
         return Promise.all(proms).then(() => this._appendBgVideo());
     },
     /**
@@ -913,7 +927,12 @@ registry.FullScreenHeight = publicWidget.Widget.extend({
      * @override
      */
     start() {
-        if (this.$el.outerHeight() > this._computeIdealHeight()) {
+        this.inModal = !!this.el.closest('.modal');
+
+        // TODO maybe review the way the public widgets work for non-visible-at-
+        // load snippets -> probably better to not do anything for them and
+        // start the widgets only once they become visible..?
+        if (this.$el.is(':not(:visible)') || this.$el.outerHeight() > this._computeIdealHeight()) {
             // Only initialize if taller than the ideal height as some extra css
             // rules may alter the full-screen-height class behavior in some
             // cases (blog...).
@@ -947,6 +966,10 @@ registry.FullScreenHeight = publicWidget.Widget.extend({
      */
     _computeIdealHeight() {
         const windowHeight = $(window).outerHeight();
+        if (this.inModal) {
+            return (windowHeight - $('#wrapwrap').position().top);
+        }
+
         // Doing it that way allows to considerer fixed headers, hidden headers,
         // connected users, ...
         const firstContentEl = $('#wrapwrap > main > :first-child')[0]; // first child to consider the padding-top of main
@@ -963,9 +986,9 @@ registry.ScrollButton = registry.anchorSlide.extend({
      */
     _onAnimateClick: function (ev) {
         ev.preventDefault();
-        const $nextSection = this.$el.closest('section').next('section');
-        if ($nextSection.length) {
-            this._scrollTo($nextSection);
+        const $nextElement = this.$el.closest('section').next();
+        if ($nextElement.length) {
+            this._scrollTo($nextElement);
         }
     },
 });
@@ -981,6 +1004,20 @@ registry.FooterSlideout = publicWidget.Widget.extend({
         const $main = this.$('> main');
         const slideoutEffect = $main.outerHeight() >= $(window).outerHeight();
         this.el.classList.toggle('o_footer_effect_enable', slideoutEffect);
+
+        // Add a pixel div over the footer, after in the DOM, so that the
+        // height of the footer is understood by Firefox sticky implementation
+        // (which it seems to not understand because of the combination of 3
+        // items: the footer is the last :visible element in the #wrapwrap, the
+        // #wrapwrap uses flex layout and the #wrapwrap is the element with a
+        // scrollbar).
+        // TODO check if the hack is still needed by future browsers.
+        this.__pixelEl = document.createElement('div');
+        this.__pixelEl.style.width = `1px`;
+        this.__pixelEl.style.height = `1px`;
+        this.__pixelEl.style.marginTop = `-1px`;
+        this.el.appendChild(this.__pixelEl);
+
         return this._super(...arguments);
     },
     /**
@@ -989,6 +1026,7 @@ registry.FooterSlideout = publicWidget.Widget.extend({
     destroy() {
         this._super(...arguments);
         this.el.classList.remove('o_footer_effect_enable');
+        this.__pixelEl.remove();
     },
 });
 
@@ -1008,6 +1046,60 @@ registry.HeaderHamburgerFull = publicWidget.Widget.extend({
     _onToggleClick() {
         document.body.classList.add('overflow-hidden');
         setTimeout(() => $(window).trigger('scroll'), 100);
+    },
+});
+
+registry.BottomFixedElement = publicWidget.Widget.extend({
+    selector: '#wrapwrap',
+
+    /**
+     * @override
+     */
+    async start() {
+        this.$scrollingElement = $().getScrollingElement();
+        this.__hideBottomFixedElements = _.debounce(() => this._hideBottomFixedElements(), 500);
+        this.$scrollingElement.on('scroll.bottom_fixed_element', this.__hideBottomFixedElements);
+        $(window).on('resize.bottom_fixed_element', this.__hideBottomFixedElements);
+        return this._super(...arguments);
+    },
+    /**
+     * @override
+     */
+    destroy() {
+        this._super(...arguments);
+        this.$scrollingElement.off('.bottom_fixed_element');
+        $(window).off('.bottom_fixed_element');
+        $('.o_bottom_fixed_element').removeClass('o_bottom_fixed_element_hidden');
+    },
+
+    //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * Hides the elements that are fixed at the bottom of the screen if the
+     * scroll reaches the bottom of the page and if the elements hide a button.
+     *
+     * @private
+     */
+    _hideBottomFixedElements() {
+        // Note: check in the whole DOM instead of #wrapwrap as unfortunately
+        // some things are still put outside of the #wrapwrap (like the livechat
+        // button which is the main reason of this code).
+        const $bottomFixedElements = $('.o_bottom_fixed_element');
+        if (!$bottomFixedElements.length) {
+            return;
+        }
+
+        $bottomFixedElements.removeClass('o_bottom_fixed_element_hidden');
+        if ((this.$scrollingElement[0].offsetHeight + this.$scrollingElement[0].scrollTop) >= (this.$scrollingElement[0].scrollHeight - 2)) {
+            const buttonEls = [...this.$('.btn:visible')];
+            for (const el of $bottomFixedElements) {
+                if (buttonEls.some(button => dom.areColliding(button, el))) {
+                    el.classList.add('o_bottom_fixed_element_hidden');
+                }
+            }
+        }
     },
 });
 

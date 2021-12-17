@@ -141,8 +141,7 @@ class Registry(Mapping):
         self.cache_sequence = None
 
         # Flags indicating invalidation of the registry or the cache.
-        self.registry_invalidated = False
-        self.cache_invalidated = False
+        self._invalidation_flags = threading.local()
 
         with closing(self.cursor()) as cr:
             self.has_unaccent = odoo.modules.db.has_unaccent(cr)
@@ -219,7 +218,9 @@ class Registry(Mapping):
         """
         from .. import models
 
-        self.clear_caches()
+        # clear cache to ensure consistency, but do not signal it
+        self.__cache.clear()
+
         lazy_property.reset_all(self)
 
         # Instantiate registered classes (via the MetaModel automatic discovery
@@ -236,10 +237,19 @@ class Registry(Mapping):
         """ Complete the setup of models.
             This must be called after loading modules and before using the ORM.
         """
-        self.clear_caches()
+        env = odoo.api.Environment(cr, SUPERUSER_ID, {})
+
+        # Uninstall registry hooks. Because of the condition, this only happens
+        # on a fully loaded registry, and not on a registry being loaded.
+        if self.ready:
+            for model in env.values():
+                model._unregister_hook()
+
+        # clear cache to ensure consistency, but do not signal it
+        self.__cache.clear()
+
         lazy_property.reset_all(self)
         self.registry_invalidated = True
-        env = odoo.api.Environment(cr, SUPERUSER_ID, {})
 
         if env.all.tocompute:
             _logger.error(
@@ -267,7 +277,12 @@ class Registry(Mapping):
         for model in models:
             model._setup_complete()
 
-        self.registry_invalidated = True
+        # Reinstall registry hooks. Because of the condition, this only happens
+        # on a fully loaded registry, and not on a registry being loaded.
+        if self.ready:
+            for model in env.values():
+                model._register_hook()
+            env['base'].flush()
 
     @lazy_property
     def field_computed(self):
@@ -302,12 +317,10 @@ class Registry(Mapping):
         def transitive_dependencies(field, seen=[]):
             if field in seen:
                 return
-            for seq1 in dependencies[field]:
+            for seq1 in dependencies.get(field, ()):
                 yield seq1
-                exceptions = (Exception,) if field.base_field.manual else ()
-                with ignore(*exceptions):
-                    for seq2 in transitive_dependencies(seq1[-1], seen + [field]):
-                        yield concat(seq1[:-1], seq2)
+                for seq2 in transitive_dependencies(seq1[-1], seen + [field]):
+                    yield concat(seq1[:-1], seq2)
 
         def concat(seq1, seq2):
             if seq1 and seq2:
@@ -358,7 +371,9 @@ class Registry(Mapping):
             try:
                 func(*args, **kwargs)
             except Exception as e:
-                _schema.error(*e.args)
+                # warn only, this is not a deployment showstopper, and
+                # can sometimes be a transient error
+                _schema.warning(*e.args)
 
     def init_models(self, cr, model_names, context, install=True):
         """ Initialize a list of models (given by their name). Call methods
@@ -438,7 +453,7 @@ class Registry(Mapping):
                 except psycopg2.OperationalError:
                     _schema.error("Unable to add index for %s", self)
             elif not index and indexname in existing:
-                sql.drop_index(cr, indexname, tablename)
+                _schema.info("Keep unexpected index %s on table %s", indexname, tablename)
 
     def add_foreign_key(self, table1, column1, table2, column2, ondelete,
                         model, module, force=True):
@@ -475,15 +490,16 @@ class Registry(Mapping):
         for key, val in self._foreign_keys.items():
             table1, column1 = key
             table2, column2, ondelete, model, module = val
-            conname = '%s_%s_fkey' % key
             deltype = sql._CONFDELTYPES[ondelete.upper()]
             spec = existing.get(key)
             if spec is None:
                 sql.add_foreign_key(cr, table1, column1, table2, column2, ondelete)
+                conname = sql.get_foreign_keys(cr, table1, column1, table2, column2, ondelete)[0]
                 model.env['ir.model.constraint']._reflect_constraint(model, conname, 'f', None, module)
-            elif spec != (conname, table2, column2, deltype):
+            elif spec[1:] != (table2, column2, deltype):
                 sql.drop_constraint(cr, table1, spec[0])
                 sql.add_foreign_key(cr, table1, column1, table2, column2, ondelete)
+                conname = sql.get_foreign_keys(cr, table1, column1, table2, column2, ondelete)[0]
                 model.env['ir.model.constraint']._reflect_constraint(model, conname, 'f', None, module)
 
     def check_tables_exist(self, cr):
@@ -541,6 +557,24 @@ class Registry(Mapping):
 
         return model._table in self._ordinary_tables
 
+    @property
+    def registry_invalidated(self):
+        """ Determine whether the current thread has modified the registry. """
+        return getattr(self._invalidation_flags, 'registry', False)
+
+    @registry_invalidated.setter
+    def registry_invalidated(self, value):
+        self._invalidation_flags.registry = value
+
+    @property
+    def cache_invalidated(self):
+        """ Determine whether the current thread has modified the cache. """
+        return getattr(self._invalidation_flags, 'cache', False)
+
+    @cache_invalidated.setter
+    def cache_invalidated(self, value):
+        self._invalidation_flags.cache = value
+
     def setup_signaling(self):
         """ Setup the inter-process signaling on this registry. """
         if self.in_test_mode():
@@ -587,7 +621,11 @@ class Registry(Mapping):
             elif self.cache_sequence != c:
                 _logger.info("Invalidating all model caches after database signaling.")
                 self.clear_caches()
-                self.cache_invalidated = False
+
+            # prevent re-signaling the clear_caches() above, or any residual one that
+            # would be inherited from the master process (first request in pre-fork mode)
+            self.cache_invalidated = False
+
             self.registry_sequence = r
             self.cache_sequence = c
 

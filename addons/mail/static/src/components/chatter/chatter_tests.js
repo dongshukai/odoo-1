@@ -3,6 +3,7 @@ odoo.define('mail/static/src/components/chatter/chatter_tests', function (requir
 
 const components = {
     Chatter: require('mail/static/src/components/chatter/chatter.js'),
+    Composer: require('mail/static/src/components/composer/composer.js'),
 };
 const {
     afterEach,
@@ -23,6 +24,14 @@ QUnit.module('chatter_tests.js', {
         this.createChatterComponent = async ({ chatter }, otherProps) => {
             const props = Object.assign({ chatterLocalId: chatter.localId }, otherProps);
             await createRootComponent(this, components.Chatter, {
+                props,
+                target: this.widget.el,
+            });
+        };
+
+        this.createComposerComponent = async (composer, otherProps) => {
+            const props = Object.assign({ composerLocalId: composer.localId }, otherProps);
+            await createRootComponent(this, components.Composer, {
                 props,
                 target: this.widget.el,
             });
@@ -80,10 +89,10 @@ QUnit.test('base rendering when chatter has no attachment', async function (asse
     );
     assert.strictEqual(
         document.querySelector(`.o_Chatter_thread`).dataset.threadLocalId,
-        this.env.models['mail.thread'].find(thread =>
-            thread.id === 100 &&
-            thread.model === 'res.partner'
-        ).localId,
+        this.env.models['mail.thread'].findFromIdentifyingData({
+            id: 100,
+            model: 'res.partner',
+        }).localId,
         "thread should have the right thread local id"
     );
     assert.strictEqual(

@@ -223,7 +223,8 @@ MockServer.include({
             return this._mockMailMessageModerate(args);
         }
         if (args.model === 'mail.message' && args.method === 'set_message_done') {
-            return this._mockMailMessageSetMessageDone(args);
+            const ids = args.args[0];
+            return this._mockMailMessageSetMessageDone(ids);
         }
         if (args.model === 'mail.message' && args.method === 'toggle_message_starred') {
             const ids = args.args[0];
@@ -332,6 +333,9 @@ MockServer.include({
      * @returns {Object}
      */
     _mockRouteMailGetSuggestedRecipient(model, res_ids) {
+        if (model === 'res.fake') {
+            return this._mockResFake_MessageGetSuggestedRecipients(model, res_ids);
+        }
         return this._mockMailThread_MessageGetSuggestedRecipients(model, res_ids);
     },
     /**
@@ -386,14 +390,13 @@ MockServer.include({
         const currentPartner = this._getRecords('res.partner', [['id', '=', this.currentPartnerId]])[0];
         const currentPartnerFormat = this._mockResPartnerMailPartnerFormat(currentPartner.id);
 
-        const needaction_inbox_counter = this._getRecords('mail.notification', [
-            ['res_partner_id', '=', this.currentPartnerId],
-            ['is_read', '=', false],
-        ]).length;
+        const needaction_inbox_counter = this._mockResPartnerGetNeedactionCount();
 
         const mailFailures = this._mockMailMessageMessageFetchFailed();
 
         const shortcodes = this._getRecords('mail.shortcode', []);
+
+        const commands = this._getRecords('mail.channel_command', []);
 
         const starredCounter = this._getRecords('mail.message', [
             ['starred_partner_ids', 'in', this.currentPartnerId],
@@ -405,11 +408,7 @@ MockServer.include({
                 channel_direct_message: directMessageInfos,
                 channel_private_group: privateGroupInfos,
             },
-            commands: [{
-                channel_types: ["channel", "chat"],
-                help: "List users in the current channel",
-                name: "who",
-            }],
+            commands,
             current_partner: currentPartnerFormat,
             current_user_id: this.currentUserId,
             mail_failures: mailFailures,
@@ -743,12 +742,16 @@ MockServer.include({
                 ['is_read', '=', false],
                 ['mail_message_id', 'in', messages.map(message => message.id)],
             ]).length;
-            return Object.assign({}, channel, {
+            const res = Object.assign({}, channel, {
                 info: extra_info,
                 last_message_id: lastMessageId,
                 members,
                 message_needaction_counter: messageNeedactionCounter,
             });
+            if (channel.channel_type === 'channel') {
+                delete res.members;
+            }
+            return res;
         });
     },
     /**
@@ -846,7 +849,8 @@ MockServer.include({
      * @private
      */
     _mockMailChannelExecuteCommand(args) {
-        const [ids, commandName] = args.args;
+        const ids = args.args[0];
+        const commandName = args.kwargs.command || args.args[1];
         const channels = this._getRecords('mail.channel', [['id', 'in', ids]]);
         if (commandName === 'leave') {
             for (const channel of channels) {
@@ -859,6 +863,24 @@ MockServer.include({
                     Object.assign({}, channel, { info: 'unsubscribe' })
                 ];
                 this._widget.call('bus_service', 'trigger', 'notification', [notifConfirmUnpin]);
+            }
+            return;
+        } else if (commandName === 'who') {
+            for (const channel of channels) {
+                const members = channel.members.map(memberId => this._getRecords('res.partner', [['id', '=', memberId]])[0].name);
+                let message = "You are alone in this channel.";
+                if (members.length > 0) {
+                    message = `Users in this channel: ${members.join(', ')} and you`;
+                }
+                const notification = [
+                    ["dbName", 'res.partner', this.currentPartnerId],
+                    {
+                        'body': `<span class="o_mail_notification">${message}</span>`,
+                        'channel_ids': [channel.id],
+                        'info': 'transient_message',
+                    }
+                ];
+                this._widget.call('bus_service', 'trigger', 'notification', [notification]);
             }
             return;
         }
@@ -963,7 +985,7 @@ MockServer.include({
             this._mockWrite('mail.channel', [
                 [channel.id],
                 { message_unread_counter: (channel.message_unread_counter || 0) + 1 },
-            ])
+            ]);
         }
         return messageId;
     },
@@ -983,10 +1005,12 @@ MockServer.include({
         } else {
             partner_id = this.currentPartnerId;
         }
+        const partner = this._getRecords('res.partner', [['id', '=', partner_id]]);
         const data = {
             'info': 'typing_status',
             'is_typing': is_typing,
             'partner_id': partner_id,
+            'partner_name': partner.name,
         };
         const notifications = [];
         for (const channel of channels) {
@@ -1050,9 +1074,9 @@ MockServer.include({
         ];
         if (domain) {
             const messages = this._getRecords('mail.message', domain);
-            notifDomain.push(
-                ['mail_message_id', 'in', messages.map(messages => messages.id)]
-            );
+            const ids = messages.map(messages => messages.id);
+            this._mockMailMessageSetMessageDone(ids);
+            return ids;
         }
         const notifications = this._getRecords('mail.notification', notifDomain);
         this._mockWrite('mail.notification', [
@@ -1078,7 +1102,7 @@ MockServer.include({
                 },
             ]);
         }
-        const notificationData = { type: 'mark_as_read', message_ids: messageIds };
+        const notificationData = { type: 'mark_as_read', message_ids: messageIds, needaction_inbox_counter: this._mockResPartnerGetNeedactionCount() };
         const notification = [[false, 'res.partner', this.currentPartnerId], notificationData];
         this._widget.call('bus_service', 'trigger', 'notification', [notification]);
         return messageIds;
@@ -1194,13 +1218,24 @@ MockServer.include({
             notifications = this._mockMailNotification_NotificationFormat(
                 notifications.map(notification => notification.id)
             );
-            return Object.assign({}, message, {
+            const trackingValueIds = this._getRecords('mail.tracking.value', [
+                ['id', 'in', message.tracking_value_ids],
+            ]);
+            const response = Object.assign({}, message, {
                 attachment_ids: formattedAttachments,
                 author_id: formattedAuthor,
                 history_partner_ids: historyPartnerIds,
                 needaction_partner_ids: needactionPartnerIds,
                 notifications,
+                tracking_value_ids: trackingValueIds,
             });
+            if (message.subtype_id) {
+                const subtype = this._getRecords('mail.message.subtype', [
+                    ['id', '=', message.subtype_id],
+                ])[0];
+                response.subtype_description = subtype.description;
+            }
+            return response;
         });
     },
     /**
@@ -1274,10 +1309,9 @@ MockServer.include({
      * messages have been marked as read, so that UI is updated.
      *
      * @private
-     * @param {Object} args
+     * @param {integer[]} ids
      */
-    _mockMailMessageSetMessageDone(args) {
-        const ids = args.args[0];
+    _mockMailMessageSetMessageDone(ids) {
         const messages = this._getRecords('mail.message', [['id', 'in', ids]]);
 
         const notifications = this._getRecords('mail.notification', [
@@ -1302,7 +1336,7 @@ MockServer.include({
             ]);
             // NOTE server is sending grouped notifications per channel_ids but
             // this optimization is not needed here.
-            const data = { type: 'mark_as_read', message_ids: [message.id], channel_ids: message.channel_ids };
+            const data = { type: 'mark_as_read', message_ids: [message.id], channel_ids: message.channel_ids, needaction_inbox_counter: this._mockResPartnerGetNeedactionCount() };
             const busNotifications = [[[false, 'res.partner', this.currentPartnerId], data]];
             this._widget.call('bus_service', 'trigger', 'notification', busNotifications);
         }
@@ -1478,6 +1512,44 @@ MockServer.include({
                 }
             }
         }
+        return result;
+    },
+    /**
+     * Simulates `_message_get_suggested_recipients` on `res.fake`.
+     *
+     * @private
+     * @param {string} model
+     * @param {integer[]} ids
+     * @returns {Object}
+     */
+    _mockResFake_MessageGetSuggestedRecipients(model, ids) {
+        const result = {};
+        const records = this._getRecords(model, [['id', 'in', ids]]);
+
+        for (const record of records) {
+            result[record.id] = [];
+            if (record.email_cc) {
+                result[record.id].push([
+                    false,
+                    record.email_cc,
+                    'CC email',
+                ]);
+            }
+            const partners = this._getRecords(
+                'res.partner',
+                [['id', 'in', record.partner_ids]],
+            );
+            if (partners.length) {
+                for (const partner of partners) {
+                    result[record.id].push([
+                        partner.id,
+                        partner.display_name,
+                        'Email partner',
+                    ]);
+                }
+            }
+        }
+
         return result;
     },
     /**
@@ -1659,6 +1731,17 @@ MockServer.include({
         return [mainMatchingPartners, extraMatchingPartners];
     },
     /**
+     * Simulates `get_needaction_count` on `res.partner`.
+     *
+     * @private
+     */
+    _mockResPartnerGetNeedactionCount() {
+        return this._getRecords('mail.notification', [
+            ['res_partner_id', '=', this.currentPartnerId],
+            ['is_read', '=', false],
+        ]).length;
+    },
+    /**
      * Simulates `im_search` on `res.partner`.
      *
      * @private
@@ -1714,9 +1797,11 @@ MockServer.include({
             { active_test: false }
         )[0];
         return {
-            "id": partner.id,
-            "display_name": partner.display_name,
             "active": partner.active,
+            "display_name": partner.display_name,
+            "id": partner.id,
+            "im_status": partner.im_status,
+            "name": partner.name,
         };
     },
 });

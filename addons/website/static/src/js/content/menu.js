@@ -238,24 +238,31 @@ publicWidget.registry.StandardAffixedHeader = BaseAnimatedHeader.extend({
 
         const mainPosScrolled = (scroll > this.headerHeight + this.topGap);
         const reachPosScrolled = (scroll > this.scrolledPoint + this.topGap);
+        const fixedUpdate = (this.fixedHeader !== mainPosScrolled);
+        const showUpdate = (this.fixedHeaderShow !== reachPosScrolled);
 
-        // Switch between static/fixed position of the header
-        if (this.fixedHeader !== mainPosScrolled) {
-            this.$el.css('transform', mainPosScrolled ? 'translate(0, -100%)' : '');
+        if (fixedUpdate || showUpdate) {
+            this.$el.css('transform',
+                reachPosScrolled
+                ? `translate(0, -${this.topGap}px)`
+                : mainPosScrolled
+                ? 'translate(0, -100%)'
+                : '');
             void this.$el[0].offsetWidth; // Force a paint refresh
-            this._toggleFixedHeader(mainPosScrolled);
         }
-        // Show/hide header
-        if (this.fixedHeaderShow !== reachPosScrolled) {
-            this.$el.css('transform', reachPosScrolled ? `translate(0, -${this.topGap}px)` : 'translate(0, -100%)');
-            this.fixedHeaderShow = reachPosScrolled;
+
+        this.fixedHeaderShow = reachPosScrolled;
+
+        if (fixedUpdate) {
+            this._toggleFixedHeader(mainPosScrolled);
+        } else if (showUpdate) {
             this._adaptToHeaderChange();
         }
     },
 });
 
 publicWidget.registry.FixedHeader = BaseAnimatedHeader.extend({
-    selector: 'header.o_header_fixed',
+    selector: 'header.o_header_fixed:not(.o_header_sidebar)',
 
     //--------------------------------------------------------------------------
     // Handlers
@@ -367,7 +374,7 @@ const BaseDisappearingHeader = publicWidget.registry.FixedHeader.extend({
 });
 
 publicWidget.registry.DisappearingHeader = BaseDisappearingHeader.extend({
-    selector: 'header.o_header_disappears',
+    selector: 'header.o_header_disappears:not(.o_header_sidebar)',
 
     //--------------------------------------------------------------------------
     // Private
@@ -390,7 +397,7 @@ publicWidget.registry.DisappearingHeader = BaseDisappearingHeader.extend({
 });
 
 publicWidget.registry.FadeOutHeader = BaseDisappearingHeader.extend({
-    selector: 'header.o_header_fade_out',
+    selector: 'header.o_header_fade_out:not(.o_header_sidebar)',
 
     //--------------------------------------------------------------------------
     // Private
@@ -418,6 +425,7 @@ publicWidget.registry.FadeOutHeader = BaseDisappearingHeader.extend({
  */
 publicWidget.registry.autohideMenu = publicWidget.Widget.extend({
     selector: 'header#top',
+    disabledInEditableMode: false,
 
     /**
      * @override
@@ -440,7 +448,7 @@ publicWidget.registry.autohideMenu = publicWidget.Widget.extend({
                 $window.trigger('resize');
             });
 
-            dom.initAutoMoreMenu(this.$topMenu, {unfoldable: '.divider, .divider ~ li'});
+            dom.initAutoMoreMenu(this.$topMenu, {unfoldable: '.divider, .divider ~ li, .o_no_autohide_item'});
         }
         this.$topMenu.removeClass('o_menu_loading');
         this.$topMenu.trigger('menu_loaded');
@@ -450,7 +458,7 @@ publicWidget.registry.autohideMenu = publicWidget.Widget.extend({
      */
     destroy() {
         this._super(...arguments);
-        if (!this.noAutohide) {
+        if (!this.noAutohide && this.$topMenu) {
             $(window).off('.autohideMenu');
             dom.destroyAutoMoreMenu(this.$topMenu);
         }
@@ -465,6 +473,7 @@ publicWidget.registry.autohideMenu = publicWidget.Widget.extend({
  */
 publicWidget.registry.menuDirection = publicWidget.Widget.extend({
     selector: 'header .navbar .nav',
+    disabledInEditableMode: false,
     events: {
         'show.bs.dropdown': '_onDropdownShow',
     },
@@ -487,12 +496,13 @@ publicWidget.registry.menuDirection = publicWidget.Widget.extend({
      * @param {integer} liOffset
      * @param {integer} liWidth
      * @param {integer} menuWidth
+     * @param {integer} pageWidth
      * @returns {boolean}
      */
-    _checkOpening: function (alignment, liOffset, liWidth, menuWidth, windowWidth) {
+    _checkOpening: function (alignment, liOffset, liWidth, menuWidth, pageWidth) {
         if (alignment === 'left') {
             // Check if ok to open the dropdown to the right (no window overflow)
-            return (liOffset + menuWidth <= windowWidth);
+            return (liOffset + menuWidth <= pageWidth);
         } else {
             // Check if ok to open the dropdown to the left (no window overflow)
             return (liOffset + liWidth - menuWidth >= 0);
@@ -512,7 +522,7 @@ publicWidget.registry.menuDirection = publicWidget.Widget.extend({
         var liOffset = $li.offset().left;
         var liWidth = $li.outerWidth();
         var menuWidth = $menu.outerWidth();
-        var windowWidth = $(window).outerWidth();
+        var pageWidth = $('#wrapwrap').outerWidth();
 
         $menu.removeClass('dropdown-menu-left dropdown-menu-right');
 
@@ -523,10 +533,10 @@ publicWidget.registry.menuDirection = publicWidget.Widget.extend({
         }
 
         // If can't open in the current direction because it would overflow the
-        // window, change the direction. But if the other direction would do the
+        // page, change the direction. But if the other direction would do the
         // same, change back the direction.
         for (var i = 0; i < 2; i++) {
-            if (!this._checkOpening(alignment, liOffset, liWidth, menuWidth, windowWidth)) {
+            if (!this._checkOpening(alignment, liOffset, liWidth, menuWidth, pageWidth)) {
                 alignment = (alignment === 'left' ? 'right' : 'left');
             }
         }
